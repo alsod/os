@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -11,6 +12,9 @@
 int STRATEGY = 1;
 #endif
 
+#ifndef DNRQUICKLISTS
+int DNRQUICKLISTS = 5;
+#endif
 
 
 
@@ -33,33 +37,73 @@ static Header base; /* empty list to get started */
 static Header *freep = NULL; /* start of free list */
 static Header *morecore(unsigned);
 
-void *malloc(unsigned nbytes) {	
- 
-    Header *p, *prevp, *test_p, *test_prevp;
-    test_p = NULL;
-    test_prevp = NULL;
+void *malloc(unsigned nbytes) {
 
-    unsigned nunits;
+    // <editor-fold defaultstate="collapsed" desc="FIRST_FIT">
+    if (STRATEGY == FIRST_FIT) {
+        Header *p, *prevp, *test_p, *test_prevp;
+        test_p = NULL;
+        test_prevp = NULL;
 
-    if (nbytes <= 0)
-        return NULL;
+        unsigned nunits;
 
-    nunits = (nbytes + sizeof (Header) - 1) / sizeof (Header) + 1;
-    if ((prevp = freep) == NULL) {
-        base.s.ptr = freep = prevp = &base;
-        base.s.size = 0;
-    }
+        if (nbytes <= 0)
+            return NULL;
 
-    /* Try to find free block */
-    for (p = prevp->s.ptr;; prevp = p, p = p->s.ptr) {
+        nunits = (nbytes + sizeof (Header) - 1) / sizeof (Header) + 1;
 
-        if (STRATEGY == FIRST_FIT) {
+        if ((prevp = freep) == NULL) {
+            base.s.ptr = freep = prevp = &base;
+            base.s.size = 0;
+        }
+
+        /* Try to find free block */
+        for (p = prevp->s.ptr;; prevp = p, p = p->s.ptr) {
+
+            /*FIRST_FIT*/
             if (p->s.size >= nunits) { /* big enough */
                 break;
             }
+            /*END FIRST_FIT*/
+
+            if (p == freep) /* wrapped around free list */
+                if ((p = morecore(nunits)) == NULL)
+                    return NULL; /* none left */
         }
 
-        if (STRATEGY == BEST_FIT) {
+        if (p->s.size == nunits) { /* exactly */
+            prevp->s.ptr = p->s.ptr;
+        } else {
+            p->s.size -= nunits;
+            p += p->s.size;
+            p->s.size = nunits;
+        }
+        freep = prevp;
+        return (void *) (p + 1);
+    }// </editor-fold>
+
+    // <editor-fold defaultstate="collapsed" desc="BEST_FIT">
+    if (STRATEGY == BEST_FIT) {
+        Header *p, *prevp, *test_p, *test_prevp;
+        test_p = NULL;
+        test_prevp = NULL;
+
+        unsigned nunits;
+
+        if (nbytes <= 0)
+            return NULL;
+
+        nunits = (nbytes + sizeof (Header) - 1) / sizeof (Header) + 1;
+
+        if ((prevp = freep) == NULL) {
+            base.s.ptr = freep = prevp = &base;
+            base.s.size = 0;
+        }
+
+        /* Try to find free block */
+        for (p = prevp->s.ptr;; prevp = p, p = p->s.ptr) {
+
+            /* BEST_FIT */
             if (p->s.size >= nunits) {
                 if (test_p == NULL) {
                     test_p = p;
@@ -69,15 +113,51 @@ void *malloc(unsigned nbytes) {
                     test_prevp = prevp;
                 }
             }
-        }
-        if (p == freep && test_p != NULL) {
-            p = test_p;
-            prevp = test_prevp;
-            break;
+
+            if (p == freep && test_p != NULL) {
+                p = test_p;
+                prevp = test_prevp;
+                break;
+            }
+            /*END BEST FIT*/
+            if (p == freep) /* wrapped around free list */
+                if ((p = morecore(nunits)) == NULL)
+                    return NULL; /* none left */
         }
 
+        if (p->s.size == nunits) { /* exactly */
+            prevp->s.ptr = p->s.ptr;
+        } else {
+            p->s.size -= nunits;
+            p += p->s.size;
+            p->s.size = nunits;
+        }
+        freep = prevp;
+        return (void *) (p + 1);
+    }// </editor-fold>
 
-        if (STRATEGY == WORST_FIT) {
+    // <editor-fold defaultstate="collapsed" desc="WORST_FIT">
+    if (STRATEGY == WORST_FIT) {
+        Header *p, *prevp, *test_p, *test_prevp;
+        test_p = NULL;
+        test_prevp = NULL;
+
+        unsigned nunits;
+
+        if (nbytes <= 0)
+            return NULL;
+
+        nunits = (nbytes + sizeof (Header) - 1) / sizeof (Header) + 1;
+
+        if ((prevp = freep) == NULL) {
+            base.s.ptr = freep = prevp = &base;
+            base.s.size = 0;
+        }
+
+        /* Try to find free block */
+        for (p = prevp->s.ptr;; prevp = p, p = p->s.ptr) {
+
+            /* WORST_FIT */
             if (p->s.size >= nunits) {
                 if (test_p == NULL) {
                     test_p = p;
@@ -94,41 +174,29 @@ void *malloc(unsigned nbytes) {
                 prevp = test_prevp;
                 break;
             }
-        }/* end worst_fit*/
+            /*END WORST_FIT*/
 
-        if (STRATEGY == QUICK_FIT) {
-            if (p->s.size >= nunits) {
-                if (test_p == NULL) {
-                    test_p = p;
-                    test_prevp = prevp;
-                } else {
-                    if (p->s.size > test_p->s.size) {
-                        test_p = p;
-                        test_prevp = prevp;
-                    }
-                }
-            }
-            if (p == freep && test_p != NULL) {
-                p = test_p;
-                prevp = test_prevp;
-                break;
-            }
-        }/* end quick_fit*/
+            if (p == freep) /* wrapped around free list */
+                if ((p = morecore(nunits)) == NULL)
+                    return NULL; /* none left */
+        }
 
-        if (p == freep) /* wrapped around free list */
-            if ((p = morecore(nunits)) == NULL)
-                return NULL; /* none left */
-    }
+        if (p->s.size == nunits) { /* exactly */
+            prevp->s.ptr = p->s.ptr;
+        } else {
+            p->s.size -= nunits;
+            p += p->s.size;
+            p->s.size = nunits;
+        }
+        freep = prevp;
+        return (void *) (p + 1);
+    }// </editor-fold>
 
-    if (p->s.size == nunits) { /* exactly */
-        prevp->s.ptr = p->s.ptr;
-    } else {
-        p->s.size -= nunits;
-        p += p->s.size;
-        p->s.size = nunits;
-    }
-    freep = prevp;
-    return (void *) (p + 1);
+    // <editor-fold defaultstate="collapsed" desc="QUICK_FIT">
+    if (STRATEGY == QUICK_FIT) {
+        
+    }// </editor-fold>
+
 }
 
 #define NALLOC  1024   /* minimum #units to request */
